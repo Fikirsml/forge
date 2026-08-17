@@ -65,6 +65,52 @@ describe('Auth (e2e)',()=>{
       .expect(409);
   });
 
+
+  describe('login (e2e)',()=>{
+
+const loginEmail='e2e-login-test@example.com'
+const loginPassword='password123'
+
+beforeAll(async()=>{
+   await request(app.getHttpServer())
+   .post('/auth/signup')
+   .send({email:loginEmail,password:loginPassword})
+})
+
+afterAll(async()=>{
+  await prisma.user.deleteMany({where:{email:loginEmail}})
+})
+
+it('/auth/login (POST) returns an access token for valid credentials', async()=>{
+  const response = await request(app.getHttpServer())
+  .post('/auth/login')
+  .send({email:loginEmail, password:loginPassword})
+  .expect(201)
+
+  expect(response.body).toHaveProperty('accessToken')
+
+  const parts=response.body.accessToken.split('.')
+  expect(parts.length).toBe(3)
+})
+
+it('/auth/login (POST) returns 401 for a wrong password', async()=>{
+  const response= await request(app.getHttpServer())
+  .post('/auth/login')
+  .send({email:loginEmail,password:'wrongPassword'})
+  .expect(401)
+})
+
+it('/auth/login (POST) returns 401 for a nonexistent email',async()=>{
+  const response=await request(app.getHttpServer())
+  .post('/auth/login')
+  .send({email:'wrong-email@gmail.com',password:loginPassword})
+  .expect(401)
+
+})
+
+
+})
     
 
 })
+
