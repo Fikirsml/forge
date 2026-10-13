@@ -5,11 +5,12 @@ import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 
+
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: { user: { findUnique: jest.Mock; create: jest.Mock } };
-  let jwtService:{signAsync: jest.Mock}
-  const token="jwt-token"
+  let jwtService: { signAsync: jest.Mock };
+  const token = 'jwt-token';
 
   beforeEach(async () => {
     prisma = {
@@ -19,15 +20,15 @@ describe('AuthService', () => {
       },
     };
 
-    jwtService={
-      signAsync:jest.fn().mockResolvedValue(token)
-    }
+    jwtService = {
+      signAsync: jest.fn().mockResolvedValue(token),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: PrismaService, useValue: prisma },
-        {provide: JwtService, useValue: jwtService}
+        { provide: JwtService, useValue: jwtService },
       ],
     }).compile();
 
@@ -64,37 +65,35 @@ describe('AuthService', () => {
     ).rejects.toThrow(ConflictException);
   });
 
+  describe('login', () => {
+    it('returns an access token for a valid credential', async () => {
+      const hash = await bcrypt.hash('password123', 10);
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'some-uuid',
+        email: 'test@example.com',
+        passwordHash: hash,
+      });
 
+      const result = await service.login({
+        email: 'test@example.com',
+        password: 'password123',
+      });
 
-  describe('login',()=>{
-      it('returns an access token for a valid credential', async()=>{
-        const hash=await bcrypt.hash('password123',10)
-        prisma.user.findUnique.mockResolvedValue({
-            id:'some-uuid',
-            email: 'test@example.com',
-            passwordHash:hash,
-        })
+      expect(result).toEqual({ accessToken: token });
+      expect(jwtService.signAsync).toHaveBeenCalledWith({
+        sub: 'some-uuid',
+        email: 'test@example.com',
+      });
+    });
 
-        const result=await service.login({
-          email:'test@example.com',
-          password:'password123',
-        })
+    it('throws error for invalid or non existent email', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      await expect(
+        service.login({ email: 'somethingrando', password: 'password123' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
 
-        expect(result).toEqual({accessToken:token})
-        expect(jwtService.signAsync).toHaveBeenCalledWith({sub:'some-uuid',email:'test@example.com'})
-
-      })
-
-
-
-      it('throws error for invalid or non existent email',async()=>{
-        prisma.user.findUnique.mockResolvedValue(null)
-        await expect(
-          service.login({email:'somethingrando',password:'password123'}),
-        ).rejects.toThrow(UnauthorizedException)
-      })
-
-       it('throws UnauthorizedException for a wrong password', async () => {
+    it('throws UnauthorizedException for a wrong password', async () => {
       const hash = await bcrypt.hash('password123', 10);
       prisma.user.findUnique.mockResolvedValue({
         id: 'some-uuid',
@@ -106,6 +105,5 @@ describe('AuthService', () => {
         service.login({ email: 'test@example.com', password: 'wrongpassword' }),
       ).rejects.toThrow(UnauthorizedException);
     });
-  })
-
+  });
 });
