@@ -3,39 +3,36 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
-import {PrismaService} from '../src/prisma/prisma.service'
+import { PrismaService } from '../src/prisma/prisma.service';
 
+describe('Auth (e2e)', () => {
+  let app: INestApplication;
+  let prisma: PrismaService;
+  const testEmail = 'e2e-test@example.com';
 
-describe('Auth (e2e)',()=>{
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
 
-    let app:INestApplication;
-    let prisma:PrismaService;
-    let testEmail='test@example.com';
-
-
-    beforeAll(async()=>{
-        const moduleFixture:TestingModule=await Test.createTestingModule({
-            imports:[AppModule]
-        }).compile()
-        app=moduleFixture.createNestApplication();
-        app.useGlobalPipes(
+    app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }),
     );
-    await app.init()
+    await app.init();
 
-    prisma=moduleFixture.get<PrismaService>(PrismaService)
-    })
+    prisma = moduleFixture.get<PrismaService>(PrismaService);
+  });
 
-    afterEach(async()=>{
-        await prisma.user.deleteMany({where:{email:testEmail}})
-    })
+  afterEach(async () => {
+    await prisma.user.deleteMany({ where: { email: testEmail } });
+  });
 
-    afterAll(async()=>{
-        await app.close()
-    })
+  afterAll(async () => {
+    await app.close();
+  });
 
-
- it('/auth/signup (POST) creates a user and never returns passwordHash', async () => {
+  it('/auth/signup (POST) creates a user and never returns passwordHash', async () => {
     const response = await request(app.getHttpServer())
       .post('/auth/signup')
       .send({ email: testEmail, password: 'password123' })
@@ -65,52 +62,87 @@ describe('Auth (e2e)',()=>{
       .expect(409);
   });
 
+  describe('login (e2e)', () => {
+    const loginEmail = 'e2e-login-test@example.com';
+    const loginPassword = 'password123';
 
-  describe('login (e2e)',()=>{
+    beforeAll(async () => {
+      await request(app.getHttpServer())
+        .post('/auth/signup')
+        .send({ email: loginEmail, password: loginPassword });
+    });
 
-const loginEmail='e2e-login-test@example.com'
-const loginPassword='password123'
+    afterAll(async () => {
+      await prisma.user.deleteMany({ where: { email: loginEmail } });
+    });
 
-beforeAll(async()=>{
-   await request(app.getHttpServer())
-   .post('/auth/signup')
-   .send({email:loginEmail,password:loginPassword})
-})
+    it('/auth/login (POST) returns an access token for valid credentials', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: loginEmail, password: loginPassword })
+        .expect(201);
 
-afterAll(async()=>{
-  await prisma.user.deleteMany({where:{email:loginEmail}})
-})
+      expect(response.body).toHaveProperty('accessToken');
 
-it('/auth/login (POST) returns an access token for valid credentials', async()=>{
-  const response = await request(app.getHttpServer())
-  .post('/auth/login')
-  .send({email:loginEmail, password:loginPassword})
-  .expect(201)
+      const parts = response.body.accessToken.split('.');
+      expect(parts.length).toBe(3);
+    });
 
-  expect(response.body).toHaveProperty('accessToken')
+    it('/auth/login (POST) returns 401 for a wrong password', () => {
+      return request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: loginEmail, password: 'wrongPassword' })
+        .expect(401);
+    });
 
-  const parts=response.body.accessToken.split('.')
-  expect(parts.length).toBe(3)
-})
+    it('/auth/login (POST) returns 401 for a nonexistent email', () => {
+      return request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'wrong-email@gmail.com', password: loginPassword })
+        .expect(401);
+    });
+  });
 
-it('/auth/login (POST) returns 401 for a wrong password', async()=>{
-  const response= await request(app.getHttpServer())
-  .post('/auth/login')
-  .send({email:loginEmail,password:'wrongPassword'})
-  .expect(401)
-})
+  describe('me (e2e)', () => {
+    const meTestEmail = 'e2e-me-test@example.com';
+    const meTestPassword = 'password123';
+    let accessToken: string;
 
-it('/auth/login (POST) returns 401 for a nonexistent email',async()=>{
-  const response=await request(app.getHttpServer())
-  .post('/auth/login')
-  .send({email:'wrong-email@gmail.com',password:loginPassword})
-  .expect(401)
+    beforeAll(async () => {
+      await request(app.getHttpServer())
+        .post('/auth/signup')
+        .send({ email: meTestEmail, password: meTestPassword });
 
-})
+      const loginResponse = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: meTestEmail, password: meTestPassword });
 
+      accessToken = loginResponse.body.accessToken;
+    });
 
-})
-    
+    afterAll(async () => {
+      await prisma.user.deleteMany({ where: { email: meTestEmail } });
+    });
 
-})
+    it('/auth/me (GET) returns 401 with no token', () => {
+      return request(app.getHttpServer()).get('/auth/me').expect(401);
+    });
 
+    it('/auth/me (GET) returns 401 with an invalid token', () => {
+      return request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Authorization', 'Bearer not-a-real-token')
+        .expect(401);
+    });
+
+    it('/auth/me (GET) returns the current user with a valid token', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(response.body.email).toBe(meTestEmail);
+      expect(response.body).not.toHaveProperty('passwordHash');
+    });
+  });
+});
